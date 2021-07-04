@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Management;
 using System.Text;
@@ -15,9 +16,6 @@ namespace SerialPortCommunicate
 {
     public partial class SerialPortCommunicate : Form
     {
-        string[] DataMemory = new string[30];
-        int DataMemory_Flag = 0;
-
         Thread RefreshCom_Thread;
         Thread DataReceived;
 
@@ -27,6 +25,8 @@ namespace SerialPortCommunicate
         private delegate void RefreshUl_PortDisconnect();
 
         ArrayList DeviceID = new ArrayList(), Description = new ArrayList();
+
+        Dictionary<string, string> MemoryDatas = new Dictionary<string, string>();
 
         public SerialPortCommunicate()
         {
@@ -181,16 +181,13 @@ namespace SerialPortCommunicate
         //btn_Memory
         private void btnMemory_Click(object sender, EventArgs e)
         {
-            RefreshUl_listBoxMemory RefreshUl_listBoxMemory = new RefreshUl_listBoxMemory(listBoxMemoryRefresh);
             string MemoryText = txtCommand.Text;
             MemoryText = MemoryText.Replace(" ", null);
             for (int i = 2; i < MemoryText.Length; i += 3)
                 MemoryText = MemoryText.Insert(i, " ");
-            DataMemory[DataMemory_Flag] = MemoryText;
-            Invoke(RefreshUl_listBoxMemory);
-            DataMemory_Flag++;
-            if (DataMemory_Flag == 25)
-                DataMemory_Flag = 0;
+
+            MemoryDatas.Add(MemoryText, MemoryText);
+            listBoxMemory.Items.Add(MemoryText);
         }
 
         //btn_Clear
@@ -293,27 +290,6 @@ namespace SerialPortCommunicate
             }
         }
 
-        //RefreshUI_listBoxMemoryRefresh
-        private void listBoxMemoryRefresh()
-        {
-            string longest = "";
-            Graphics g = listBoxMemory.CreateGraphics();
-            listBoxMemory.Items.Clear();
-            foreach (string i in DataMemory)
-            {
-                if (i == null)
-                    listBoxMemory.Items.Add("00");
-                else
-                    listBoxMemory.Items.Add(i);
-            }
-            for(int i = 0; i < DataMemory.Length; i++)
-            {
-                if (DataMemory[i] != null && DataMemory[i].Length > longest.Length)
-                    longest = DataMemory[i];
-            }
-            listBoxMemory.HorizontalExtent = Convert.ToInt32(g.MeasureString(longest, listBoxMemory.Font).Width);
-        }
-
         //RefreshUI_PortDisconnect
         private void PortDisconnect()
         {
@@ -350,20 +326,22 @@ namespace SerialPortCommunicate
 
         private void listBoxMemory_Click(object sender, EventArgs e)
         {
-            if (listBoxMemory.SelectedItem != null)
+            if (listBoxMemory.SelectedIndex != -1)
             {
-                txtCommand.Text = (listBoxMemory.SelectedItem).ToString();
+                txtCommand.Text = MemoryDatas[listBoxMemory.SelectedItem.ToString()];
                 txtCommand.Focus();
             }
         }
 
         private void listBoxMemory_DoubleClick(object sender, EventArgs e)
         {
+            if (listBoxMemory.SelectedIndex == -1)
+                return;
             Rectangle r = listBoxMemory.GetItemRectangle(listBoxMemory.SelectedIndex);
             txtEdit.Location = new Point(r.X + listBoxMemory.Location.X, r.Y + listBoxMemory.Location.Y + 15);
             txtEdit.Size = new Size(r.Width, r.Height);
             txtEdit.Visible = true;
-            txtEdit.Text = (string)listBoxMemory.SelectedItem;
+            txtEdit.Text = MemoryDatas[(string)listBoxMemory.SelectedItem];
             txtEdit.Focus();
         }
 
@@ -377,7 +355,7 @@ namespace SerialPortCommunicate
 
         private void txtEdit_Leave(object sender, EventArgs e)
         {
-            listBoxMemory.Items[listBoxMemory.SelectedIndex] = txtEdit.Text;
+            MemoryDatas[(string)listBoxMemory.SelectedItem] = txtEdit.Text;
             txtEdit.Visible = false;
             listBoxMemory.Focus();
         }
@@ -391,6 +369,78 @@ namespace SerialPortCommunicate
         private void rchTxtBoxData_TextChanged(object sender, EventArgs e)
         {
             rchTxtBoxData.ScrollToCaret();
+        }
+
+        private void btn_Import_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog dlg = new OpenFileDialog();
+            dlg.Title = "Memory Import";
+            dlg.InitialDirectory = Directory.GetCurrentDirectory();
+            dlg.Filter = "Txt File|*.txt";
+
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                using (StreamReader sr = new StreamReader(dlg.FileName))
+                {
+                    try
+                    {
+                        string line = "";
+                        string memoryName = "";
+                        string memoryData = "";
+                        Dictionary<string, string> MemoryDatas_New = new Dictionary<string, string>();
+
+                        while ((line = sr.ReadLine()) != null)
+                        {
+                            if (line != "" || line.StartsWith("//"))//"//"←註解
+                            {
+                                string[] lineDetail = line.Split(':');
+
+                                if (lineDetail[0] == "Name")
+                                    memoryName = lineDetail[1];
+                                else if (lineDetail[0] == "Data")
+                                {
+                                    memoryData = lineDetail[1];
+
+                                    if (string.IsNullOrEmpty(memoryName))
+                                        memoryName = memoryData;
+                                    MemoryDatas_New.Add(memoryName, memoryData);
+                                }
+                            }
+                        }
+
+                        MemoryDatas = MemoryDatas_New;
+                        listBoxMemory.Items.Clear();
+                        foreach (var data in MemoryDatas)
+                            listBoxMemory.Items.Add(data.Key);
+                    }
+                    catch (Exception)
+                    {
+                        MessageBox.Show("檔案格式有誤");
+                    }
+                }
+            }
+        }
+
+        private void btn_Export_Click(object sender, EventArgs e)
+        {
+            SaveFileDialog dlg = new SaveFileDialog();
+            dlg.Title = "Memory Export";
+            dlg.FileName = "Memory_" + DateTime.Now.ToString("yyyyMMddHHmmSS");
+            dlg.InitialDirectory = Directory.GetCurrentDirectory();
+            dlg.Filter = "Txt File|*.txt";
+
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                using (StreamWriter sw = new StreamWriter(dlg.FileName))
+                {
+                    foreach(var data in MemoryDatas)
+                    {
+                        sw.WriteLine("Name:" + data.Key);
+                        sw.WriteLine("Data:" + data.Value);
+                        sw.WriteLine();
+                    }
+                }
+            }
         }
 
         //CloseForm
